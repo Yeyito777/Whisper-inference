@@ -1,0 +1,18 @@
+# Build output
+whispercpp/*
+
+# Models (large binary files)
+models/*
+
+# Keep directory structure
+!whispercpp/.gitkeep
+!models/.gitkeep
+
+# Build artifacts inside src/
+src/build/
+
+# Editor / OS junk
+*.swp
+*.swo
+*~
+.DS_Store
