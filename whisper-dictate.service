@@ -1,0 +1,14 @@
+[Unit]
+Description=Whisper push-to-talk dictation daemon
+After=graphical-session.target
+ConditionPathIsDirectory=/sys/module/amdgpu
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+ExecStart=%h/.local/bin/whisper-dictate
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
