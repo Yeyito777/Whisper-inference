@@ -21,11 +21,6 @@ LIB_DIR     := $(BIN_DIR)
 SDL_CFLAGS  := $(shell pkg-config --cflags sdl2)
 SDL_LIBS    := $(shell pkg-config --libs sdl2)
 
-# Install paths
-PREFIX      := $(HOME)/.local
-BIN_PREFIX  := $(PREFIX)/bin
-LIB_PREFIX  := $(PREFIX)/lib
-CONFIG_DIR  := $(HOME)/.config/whisper
 SERVICE_DIR := $(HOME)/.config/systemd/user
 
 .PHONY: all configure build libs clean rebuild dictate install uninstall
@@ -59,7 +54,7 @@ $(DICTATE_BIN): $(DICTATE_SRC) $(SDL_SRC)
 		$(DICTATE_SRC) $(SDL_SRC) \
 		-L$(LIB_DIR) -lwhisper -lggml \
 		$(SDL_LIBS) -lXtst -lX11 -lpthread \
-		-Wl,-rpath,$(LIB_DIR),-rpath,$(LIB_PREFIX) \
+		-Wl,-rpath,$(LIB_DIR) \
 		-o $(DICTATE_BIN)
 	@echo "Built whisper-dictate"
 
@@ -68,33 +63,19 @@ $(CTL_BIN): $(CTL_SRC)
 	@echo "Built whisper-ctl"
 
 install: all
-	@mkdir -p $(BIN_PREFIX) $(LIB_PREFIX) $(CONFIG_DIR) $(SERVICE_DIR)
-	@cp $(DICTATE_BIN) $(CTL_BIN) $(BIN_PREFIX)/
-	@cp $(BIN_DIR)/lib*.so* $(LIB_PREFIX)/
-	@if [ ! -f $(CONFIG_DIR)/dictate.conf ]; then \
-		sed 's|^model = .*|model = $(MODELS_DIR)ggml-large-v3-turbo.bin|' \
-			$(PROJECT_DIR)dictate.conf > $(CONFIG_DIR)/dictate.conf; \
-		echo "Created $(CONFIG_DIR)/dictate.conf"; \
-	else \
-		echo "Config exists at $(CONFIG_DIR)/dictate.conf (not overwritten)"; \
-	fi
+	@mkdir -p $(SERVICE_DIR)
 	@cp $(PROJECT_DIR)whisper-dictate.service $(SERVICE_DIR)/
 	@systemctl --user daemon-reload
 	@systemctl --user enable whisper-dictate
 	@echo ""
-	@echo "Installed:"
-	@echo "  Binaries: $(BIN_PREFIX)/whisper-dictate, $(BIN_PREFIX)/whisper-ctl"
-	@echo "  Libraries: $(LIB_PREFIX)/lib{whisper,ggml}*.so"
-	@echo "  Config: $(CONFIG_DIR)/dictate.conf"
-	@echo "  Service: enabled (start with 'systemctl --user start whisper-dictate')"
+	@echo "Service installed and enabled."
+	@echo "Start with: systemctl --user start whisper-dictate"
 
 uninstall:
 	-@systemctl --user disable --now whisper-dictate 2>/dev/null
 	@rm -f $(SERVICE_DIR)/whisper-dictate.service
 	@systemctl --user daemon-reload
-	@rm -f $(BIN_PREFIX)/whisper-dictate $(BIN_PREFIX)/whisper-ctl
-	@rm -f $(LIB_PREFIX)/libwhisper.so* $(LIB_PREFIX)/libggml.so*
-	@echo "Uninstalled whisper-dictate"
+	@echo "Service removed."
 
 clean:
 	rm -rf $(BUILD_DIR)

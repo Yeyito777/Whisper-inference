@@ -18,6 +18,8 @@
 #include <poll.h>
 #include <unistd.h>
 #include <signal.h>
+#include <libgen.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -41,17 +43,9 @@ static std::string str_trim(const std::string &s) {
     return s.substr(a, b - a + 1);
 }
 
-static std::string config_dir() {
-    const char *xdg = getenv("XDG_CONFIG_HOME");
-    if (xdg && xdg[0]) return std::string(xdg) + "/whisper";
-    const char *home = getenv("HOME");
-    if (home) return std::string(home) + "/.config/whisper";
-    return ".";
-}
-
-static Config load_config() {
+static Config load_config(const std::string &exe_dir) {
     Config cfg;
-    std::string path = config_dir() + "/dictate.conf";
+    std::string path = exe_dir + "/dictate.conf";
     std::ifstream f(path);
     if (!f.is_open()) {
         fprintf(stderr, "dictate: no config at %s, using defaults\n", path.c_str());
@@ -181,9 +175,22 @@ int main(int argc, char **argv) {
         return 0;
     }
 
-    Config cfg = load_config();
+    // Resolve exe directory for config + model paths
+    char exe_buf[4096];
+    ssize_t len = readlink("/proc/self/exe", exe_buf, sizeof(exe_buf) - 1);
+    std::string exe_dir;
+    if (len > 0) {
+        exe_buf[len] = '\0';
+        exe_dir = dirname(exe_buf);
+    } else {
+        exe_dir = ".";
+    }
+
+    Config cfg = load_config(exe_dir);
 
     std::string model_path = cfg.model;
+    if (!model_path.empty() && model_path[0] != '/')
+        model_path = exe_dir + "/" + model_path;
 
     fprintf(stderr, "dictate: model=%s capture=%d lang=%s\n",
             model_path.c_str(), cfg.capture_id, cfg.language.c_str());
