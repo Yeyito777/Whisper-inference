@@ -11,6 +11,10 @@ models/*
 # Build artifacts inside src/
 src/build/
 
+# Compiled binaries (built by `make dictate`)
+whisper-dictate
+whisper-ctl
+
 # Editor / OS junk
 *.swp
 *.swo

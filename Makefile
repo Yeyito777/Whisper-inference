@@ -5,13 +5,30 @@ BIN_DIR     := $(PROJECT_DIR)whispercpp
 MODELS_DIR  := $(PROJECT_DIR)models
 NPROC       := $(shell nproc)
 
-.PHONY: all configure build install clean rebuild
+# Dictate daemon paths
+DICTATE_SRC := $(PROJECT_DIR)whisper-dictate.cpp
+DICTATE_BIN := $(PROJECT_DIR)whisper-dictate
+CTL_SRC     := $(PROJECT_DIR)whisper-ctl.c
+CTL_BIN     := $(PROJECT_DIR)whisper-ctl
 
-all: configure build install
+# Include/lib paths for dictate build
+WHISPER_INC := $(SRC_DIR)/include
+GGML_INC    := $(SRC_DIR)/ggml/include
+SDL_SRC     := $(SRC_DIR)/examples/common-sdl.cpp
+SDL_HDR_DIR := $(SRC_DIR)/examples
+LIB_DIR     := $(BIN_DIR)
+
+SDL_CFLAGS  := $(shell pkg-config --cflags sdl2)
+SDL_LIBS    := $(shell pkg-config --libs sdl2)
+
+.PHONY: all configure build install clean rebuild dictate
+
+all: configure build install dictate
 
 configure:
 	cmake -B $(BUILD_DIR) -S $(SRC_DIR) \
 		-DGGML_VULKAN=1 \
+		-DWHISPER_SDL2=ON \
 		-DCMAKE_BUILD_TYPE=Release
 
 build:
@@ -27,8 +44,26 @@ install:
 	@echo "Binaries installed to $(BIN_DIR)/"
 	@ls $(BIN_DIR)/whisper-* 2>/dev/null | wc -l | xargs -I{} echo "  {} binaries ready"
 
+dictate: $(DICTATE_BIN) $(CTL_BIN)
+
+$(DICTATE_BIN): $(DICTATE_SRC) $(SDL_SRC)
+	g++ -O2 -std=c++17 \
+		-I$(WHISPER_INC) -I$(GGML_INC) -I$(SDL_HDR_DIR) \
+		$(SDL_CFLAGS) \
+		$(DICTATE_SRC) $(SDL_SRC) \
+		-L$(LIB_DIR) -lwhisper -lggml \
+		$(SDL_LIBS) -lXtst -lX11 -lpthread \
+		-Wl,-rpath,$(LIB_DIR) \
+		-o $(DICTATE_BIN)
+	@echo "Built whisper-dictate"
+
+$(CTL_BIN): $(CTL_SRC)
+	gcc -O2 -std=c11 $(CTL_SRC) -o $(CTL_BIN)
+	@echo "Built whisper-ctl"
+
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(BIN_DIR)/*.so* $(BIN_DIR)/whisper-*
+	rm -f $(DICTATE_BIN) $(CTL_BIN)
 
 rebuild: clean all
