@@ -70,12 +70,19 @@ static Config load_config(const std::string &exe_dir) {
 
 static Display *xdpy = nullptr;
 
+static int on_x_io_error(Display *) {
+    fprintf(stderr, "dictate: X server connection lost, exiting\n");
+    _exit(0);
+    return 0;
+}
+
 static void xtest_init() {
     xdpy = XOpenDisplay(nullptr);
     if (!xdpy) {
         fprintf(stderr, "dictate: cannot open X display\n");
         exit(1);
     }
+    XSetIOErrorHandler(on_x_io_error);
     int ev, err, maj, min;
     if (!XTestQueryExtension(xdpy, &ev, &err, &maj, &min)) {
         fprintf(stderr, "dictate: XTest extension not available\n");

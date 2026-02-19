@@ -28,7 +28,7 @@ Deep-dive into the implementation of the push-to-talk dictation system: the daem
 
 5. **SDL2 audio init** (main:218–225) — `audio_async` is whisper.cpp's SDL2 audio wrapper (from `src/examples/common-sdl.cpp`). Constructor takes buffer length in ms (30000 = 30s circular buffer). `audio.init(capture_id, 16000)` opens the capture device at 16kHz mono float32. The device starts **paused** — no audio is captured until `audio.resume()`.
 
-6. **XTest init** (`xtest_init`:73–84) — Opens a separate X11 display connection (the daemon's own, not dwm's). Queries for the XTest extension. This connection persists for the daemon's lifetime — one `XOpenDisplay` call, reused for all keystroke injections.
+6. **XTest init** (`xtest_init`:73–91) — Opens a separate X11 display connection (the daemon's own, not dwm's). Registers a custom `XSetIOErrorHandler` (`on_x_io_error`) that replaces Xlib's default fatal handler — on X disconnect, prints a clean message and calls `_exit(0)` instead of Xlib's ugly `XIO: fatal IO error` + `exit(1)`. Queries for the XTest extension. This connection persists for the daemon's lifetime — one `XOpenDisplay` call, reused for all keystroke injections.
 
 7. **Unix socket creation** (`create_socket`:134–153) — `$XDG_RUNTIME_DIR/whisper-dictate.sock` (typically `/run/user/1000/whisper-dictate.sock`). `AF_UNIX` + `SOCK_STREAM`. `unlink()` first to clean up stale sockets from a previous crash. `chmod(0700)` for user-only access. `listen(fd, 4)` — backlog of 4 is more than enough since commands are sequential.
 
@@ -143,14 +143,16 @@ Modifier is `0` (no modifier required). `spawn()` forks+execs the command array.
 [Service]
 Type=simple
 Environment=DISPLAY=:0
-ExecStart=/home/yeyito/Workspace/Whisper-inference/whisper-dictate
-Restart=on-failure
-RestartSec=5
+ExecStartPre=/bin/sh -c 'until xset q >/dev/null 2>&1; do sleep 2; done'
+ExecStart=%h/Config/whisper/whisper-dictate
+Restart=always
+RestartSec=2
 ```
 
 - `Type=simple` — systemd considers the service started as soon as the process is running. No readiness notification needed.
 - `Environment=DISPLAY=:0` — Required because user services don't inherit the X11 display variable. Without this, `XOpenDisplay(NULL)` fails.
-- `Restart=on-failure` + `RestartSec=5` — If the daemon crashes, systemd restarts it after 5 seconds. During early development this caused crash-looping when `DISPLAY` wasn't set (the model would load into VRAM, fail on XOpenDisplay, unload, restart, reload — visible as VRAM flickering).
+- `ExecStartPre` — Blocks until X server is accepting connections (`xset q` succeeds). Prevents the daemon from starting without X, which would waste time loading the model into VRAM only to fail on `XOpenDisplay`. Previously this caused crash-looping (model load → XOpenDisplay fail → exit → restart → repeat, visible as VRAM flickering).
+- `Restart=always` + `RestartSec=2` — The daemon exits cleanly (code 0) on X disconnect via custom `XSetIOErrorHandler`, so `on-failure` would not trigger restart. `always` ensures restart regardless of exit code. `systemctl stop` still works — systemd prevents restart on explicit stop. On restart, `ExecStartPre` blocks until X is back, so the model is only loaded once X is ready.
 
 ## Design decisions and rejected approaches
 

@@ -6,9 +6,10 @@ ConditionPathIsDirectory=/sys/module/amdgpu
 [Service]
 Type=simple
 Environment=DISPLAY=:0
+ExecStartPre=/bin/sh -c 'until xset q >/dev/null 2>&1; do sleep 2; done'
 ExecStart=%h/Config/whisper/whisper-dictate
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=2
 
 [Install]
 WantedBy=default.target
