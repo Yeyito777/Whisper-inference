@@ -11,6 +11,7 @@ keyboard F1 release ──> dwm ──> whisper-ctl stop  ──> Unix socket
                                               whisper-dictate daemon
                                               ├── model in VRAM (turbo)
                                               ├── SDL2 mic capture
+                                              ├── SDL2 sound feedback (connected/disconnected.wav)
                                               ├── whisper.cpp inference
                                               └── XTest keystroke injection
                                                         │
@@ -19,7 +20,7 @@ keyboard F1 release ──> dwm ──> whisper-ctl stop  ──> Unix socket
 
 ### Components
 
-- **whisper-dictate** — Daemon (systemd user service). Loads the whisper model into VRAM once at startup. Listens on `$XDG_RUNTIME_DIR/whisper-dictate.sock`. On `start`: resumes SDL2 mic capture. On `stop`: pauses capture, transcribes all buffered audio (up to 30s), injects text via XTest.
+- **whisper-dictate** — Daemon (systemd user service). Loads the whisper model into VRAM once at startup. Listens on `$XDG_RUNTIME_DIR/whisper-dictate.sock`. On `start`: plays connected.wav, resumes SDL2 mic capture. On `stop`: plays disconnected.wav, pauses capture, transcribes all buffered audio (up to 30s), injects text via XTest. Sound files live in `assets/`.
 - **whisper-ctl** — Tiny C client. Connects to the socket, sends `start` or `stop`, exits. Spawned by dwm as a fire-and-forget process.
 - **dwm keybindings** — F1 KeyPress calls `whisper-ctl start`, F1 KeyRelease calls `whisper-ctl stop`. `XkbSetDetectableAutoRepeat` suppresses autorepeat so only real releases fire.
 
@@ -90,10 +91,10 @@ static const char *dictate_stop[]  = { "/path/to/whisper-ctl", "stop", NULL };
 
 ## How it works
 
-1. On login, systemd starts `whisper-dictate`. The turbo model loads into VRAM (~1.6 GB). The daemon opens the mic (paused) and waits on the socket.
-2. User presses F1. dwm spawns `whisper-ctl start`. The daemon resumes mic capture and clears the audio buffer.
+1. On login, systemd starts `whisper-dictate`. The turbo model loads into VRAM (~1.6 GB). The daemon opens the mic (paused), loads sound effects from `assets/`, and waits on the socket.
+2. User presses F1. dwm spawns `whisper-ctl start`. The daemon plays `connected.wav`, resumes mic capture, and clears the audio buffer.
 3. User speaks while holding F1. SDL2's audio callback fills a 30-second circular buffer in the background.
-4. User releases F1. dwm spawns `whisper-ctl stop`. The daemon pauses capture, grabs all buffered audio, and runs `whisper_full()` on it.
+4. User releases F1. dwm spawns `whisper-ctl stop`. The daemon plays `disconnected.wav`, pauses capture, grabs all buffered audio, and runs `whisper_full()` on it.
 5. The transcribed text is injected character-by-character into the focused window via XTest fake key events.
 
 ## Troubleshooting

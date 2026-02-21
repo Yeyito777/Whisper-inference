@@ -6,7 +6,7 @@ Deep-dive into the implementation of the push-to-talk dictation system: the daem
 
 | File | Language | Purpose |
 |------|----------|---------|
-| `whisper-dictate.cpp` | C++17 | Daemon — model loading, audio capture, transcription, keystroke injection |
+| `whisper-dictate.cpp` | C++17 | Daemon — model loading, audio capture, sound feedback, transcription, keystroke injection |
 | `whisper-ctl.c` | C11 | IPC client — sends start/stop over Unix socket |
 | `dictate.conf` | INI-style | Runtime config — mic device, model path, language |
 | `Makefile` | Make | Build targets for whisper.cpp (cmake) and dictate binaries (direct g++/gcc) |
@@ -28,7 +28,9 @@ Deep-dive into the implementation of the push-to-talk dictation system: the daem
 
 5. **SDL2 audio init** (main:218–225) — `audio_async` is whisper.cpp's SDL2 audio wrapper (from `src/examples/common-sdl.cpp`). Constructor takes buffer length in ms (30000 = 30s circular buffer). `audio.init(capture_id, 16000)` opens the capture device at 16kHz mono float32. The device starts **paused** — no audio is captured until `audio.resume()`.
 
-6. **XTest connect** (`xtest_connect`:81–92) — Opens a separate X11 display connection (the daemon's own, not dwm's). Registers `XSetIOErrorHandler` with `on_x_io_error` which uses `longjmp` to return control to the main reconnect loop instead of crashing. Queries for the XTest extension. Returns bool so it can be used both at startup and during reconnection. A `setjmp` point before the main loop catches X disconnects: pauses recording if active, polls `XOpenDisplay` every 2s, then retries any `pending_text` that was interrupted mid-injection.
+6. **Sound effects init** (`load_sounds`) — Loads `assets/connected.wav` and `assets/disconnected.wav` via `SDL_LoadWAV` into memory. Opens an SDL2 playback device matching the WAV spec. Paths are resolved relative to `exe_dir` like config and model paths.
+
+7. **XTest connect** (`xtest_connect`:81–92) — Opens a separate X11 display connection (the daemon's own, not dwm's). Registers `XSetIOErrorHandler` with `on_x_io_error` which uses `longjmp` to return control to the main reconnect loop instead of crashing. Queries for the XTest extension. Returns bool so it can be used both at startup and during reconnection. A `setjmp` point before the main loop catches X disconnects: pauses recording if active, polls `XOpenDisplay` every 2s, then retries any `pending_text` that was interrupted mid-injection.
 
 7. **Unix socket creation** (`create_socket`:134–153) — `$XDG_RUNTIME_DIR/whisper-dictate.sock` (typically `/run/user/1000/whisper-dictate.sock`). `AF_UNIX` + `SOCK_STREAM`. `unlink()` first to clean up stale sockets from a previous crash. `chmod(0700)` for user-only access. `listen(fd, 4)` — backlog of 4 is more than enough since commands are sequential.
 
@@ -39,12 +41,14 @@ The loop uses `poll()` with a 200ms timeout on the listening socket. When idle (
 1. `accept()` → `read()` → `close()` — the client connection is transient (whisper-ctl connects, sends a few bytes, disconnects).
 2. Command is trimmed and matched against `"start"` or `"stop"`.
 
-**On "start"** (main:253–258):
+**On "start"**:
+- `play_sound(snd_connected_buf, snd_connected_len)` — Plays the connected sound via `SDL_QueueAudio` on the playback device. Non-blocking — sound plays asynchronously.
 - `audio.resume()` — Calls `SDL_PauseAudioDevice(dev, 0)` which starts the SDL audio callback. The callback (`audio_async::callback` in common-sdl.cpp:139) writes incoming samples into the circular buffer under a mutex.
 - `audio.clear()` — Resets the circular buffer position and length to 0 so we don't transcribe stale audio from a previous recording.
 - `recording = true` — Prevents duplicate starts, enables stop handling.
 
-**On "stop"** (main:259–312):
+**On "stop"**:
+- `play_sound(snd_disconnected_buf, snd_disconnected_len)` — Plays the disconnected sound. `SDL_ClearQueuedAudio` first to cut off any still-playing sound, then queues and unpauses.
 - `SDL_Delay(100)` — 100ms grace period. Without this, the last ~50ms of speech can be cut off because `audio.pause()` stops the callback immediately.
 - `audio.get(30000, pcm)` — Copies all available samples (up to 30s) from the circular buffer into `pcm`. The circular buffer uses a read position that trails the write position, returning samples in chronological order. This is a snapshot — the callback may still be writing, but the mutex in `audio_async::get()` ensures a consistent read.
 - `audio.pause()` — Stops the SDL audio callback.

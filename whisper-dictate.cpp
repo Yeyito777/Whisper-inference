@@ -143,6 +143,46 @@ static void xtest_type(const std::string &text) {
     XFlush(xdpy);
 }
 
+// ----- sound effects -----
+
+static SDL_AudioDeviceID playback_dev = 0;
+static Uint8 *snd_connected_buf = nullptr;
+static Uint32 snd_connected_len = 0;
+static Uint8 *snd_disconnected_buf = nullptr;
+static Uint32 snd_disconnected_len = 0;
+
+static void load_sounds(const std::string &exe_dir) {
+    SDL_AudioSpec spec;
+    std::string path;
+
+    path = exe_dir + "/assets/connected.wav";
+    if (!SDL_LoadWAV(path.c_str(), &spec, &snd_connected_buf, &snd_connected_len)) {
+        fprintf(stderr, "dictate: failed to load %s: %s\n", path.c_str(), SDL_GetError());
+        return;
+    }
+
+    SDL_AudioSpec obtained;
+    playback_dev = SDL_OpenAudioDevice(nullptr, 0, &spec, &obtained, 0);
+    if (playback_dev == 0) {
+        fprintf(stderr, "dictate: failed to open playback device: %s\n", SDL_GetError());
+        SDL_FreeWAV(snd_connected_buf);
+        snd_connected_buf = nullptr;
+        return;
+    }
+
+    path = exe_dir + "/assets/disconnected.wav";
+    if (!SDL_LoadWAV(path.c_str(), &spec, &snd_disconnected_buf, &snd_disconnected_len)) {
+        fprintf(stderr, "dictate: failed to load %s: %s\n", path.c_str(), SDL_GetError());
+    }
+}
+
+static void play_sound(Uint8 *buf, Uint32 len) {
+    if (!playback_dev || !buf) return;
+    SDL_ClearQueuedAudio(playback_dev);
+    SDL_QueueAudio(playback_dev, buf, len);
+    SDL_PauseAudioDevice(playback_dev, 0);
+}
+
 // ----- socket -----
 
 static std::string socket_path() {
@@ -244,6 +284,8 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "dictate: audio ready (paused)\n");
 
+    load_sounds(exe_dir);
+
     if (!xtest_connect()) {
         fprintf(stderr, "dictate: cannot open X display\n");
         whisper_free(ctx);
@@ -297,6 +339,7 @@ int main(int argc, char **argv) {
 
         if (cmd == "start" && !recording) {
             fprintf(stderr, "dictate: recording started\n");
+            play_sound(snd_connected_buf, snd_connected_len);
             audio.resume();
             audio.clear();
             recording = true;
@@ -304,6 +347,7 @@ int main(int argc, char **argv) {
         else if (cmd == "stop" && recording) {
             recording = false;
             fprintf(stderr, "dictate: recording stopped, transcribing...\n");
+            play_sound(snd_disconnected_buf, snd_disconnected_len);
 
             SDL_Delay(100);
 
@@ -376,6 +420,10 @@ int main(int argc, char **argv) {
             pending_text.clear();
         }
     }
+
+    if (playback_dev) SDL_CloseAudioDevice(playback_dev);
+    if (snd_connected_buf) SDL_FreeWAV(snd_connected_buf);
+    if (snd_disconnected_buf) SDL_FreeWAV(snd_disconnected_buf);
 
     std::string path = socket_path();
     unlink(path.c_str());
