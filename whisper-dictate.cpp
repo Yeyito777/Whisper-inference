@@ -35,6 +35,8 @@ struct Config {
     int capture_id   = -1;
     std::string model = "models/ggml-large-v3-turbo.bin";
     std::string language = "en";
+    std::string prompt;
+    std::vector<std::pair<std::string, std::string>> replacements;
 };
 
 static std::string str_trim(const std::string &s) {
@@ -63,6 +65,15 @@ static Config load_config(const std::string &exe_dir) {
         if (key == "capture_id") cfg.capture_id = std::stoi(val);
         else if (key == "model")    cfg.model = val;
         else if (key == "language") cfg.language = val;
+        else if (key == "prompt")   cfg.prompt = val;
+        else if (key == "replace") {
+            auto arrow = val.find("->");
+            if (arrow != std::string::npos)
+                cfg.replacements.push_back({
+                    str_trim(val.substr(0, arrow)),
+                    str_trim(val.substr(arrow + 2))
+                });
+        }
     }
     return cfg;
 }
@@ -317,6 +328,7 @@ int main(int argc, char **argv) {
             wparams.no_context       = true;
             wparams.no_timestamps    = true;
             wparams.language         = cfg.language.c_str();
+            wparams.initial_prompt   = cfg.prompt.empty() ? nullptr : cfg.prompt.c_str();
             wparams.n_threads        = 4;
 
             if (whisper_full(ctx, wparams, pcm.data(), pcm.size()) != 0) {
@@ -339,6 +351,23 @@ int main(int argc, char **argv) {
             if (text.empty()) {
                 fprintf(stderr, "dictate: (silence) [%.0f ms]\n", ms);
                 continue;
+            }
+
+            for (auto &[from, to] : cfg.replacements) {
+                size_t pos = 0;
+                while ((pos = [&]{
+                    for (size_t i = pos; i + from.size() <= text.size(); i++) {
+                        bool match = true;
+                        for (size_t j = 0; j < from.size(); j++) {
+                            if (tolower(text[i+j]) != tolower(from[j])) { match = false; break; }
+                        }
+                        if (match) return i;
+                    }
+                    return std::string::npos;
+                }()) != std::string::npos) {
+                    text.replace(pos, from.size(), to);
+                    pos += to.size();
+                }
             }
 
             fprintf(stderr, "dictate: \"%s\" [%.0f ms]\n", text.c_str(), ms);
