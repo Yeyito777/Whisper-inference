@@ -20,6 +20,7 @@
 #include <signal.h>
 #include <libgen.h>
 
+#include <csetjmp>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -69,25 +70,26 @@ static Config load_config(const std::string &exe_dir) {
 // ----- XTest text injection -----
 
 static Display *xdpy = nullptr;
+static jmp_buf x_error_jmp;
+static std::string pending_text;
 
 static int on_x_io_error(Display *) {
-    fprintf(stderr, "dictate: X server connection lost, exiting\n");
-    _exit(0);
+    xdpy = nullptr;
+    longjmp(x_error_jmp, 1);
     return 0;
 }
 
-static void xtest_init() {
+static bool xtest_connect() {
     xdpy = XOpenDisplay(nullptr);
-    if (!xdpy) {
-        fprintf(stderr, "dictate: cannot open X display\n");
-        exit(1);
-    }
+    if (!xdpy) return false;
     XSetIOErrorHandler(on_x_io_error);
     int ev, err, maj, min;
     if (!XTestQueryExtension(xdpy, &ev, &err, &maj, &min)) {
-        fprintf(stderr, "dictate: XTest extension not available\n");
-        exit(1);
+        XCloseDisplay(xdpy);
+        xdpy = nullptr;
+        return false;
     }
+    return true;
 }
 
 static void xtest_type(const std::string &text) {
@@ -231,13 +233,38 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "dictate: audio ready (paused)\n");
 
-    xtest_init();
+    if (!xtest_connect()) {
+        fprintf(stderr, "dictate: cannot open X display\n");
+        whisper_free(ctx);
+        return 1;
+    }
+
     int sock_fd = create_socket();
 
-    bool recording = false;
+    volatile bool recording = false;
     struct pollfd pfd = { .fd = sock_fd, .events = POLLIN, .revents = 0 };
 
     fprintf(stderr, "dictate: ready\n");
+
+    if (setjmp(x_error_jmp) != 0) {
+        fprintf(stderr, "dictate: X server connection lost\n");
+        if (recording) {
+            audio.pause();
+            recording = false;
+        }
+        fprintf(stderr, "dictate: waiting for X server...\n");
+        while (running) {
+            sleep(2);
+            if (xtest_connect()) {
+                fprintf(stderr, "dictate: X server reconnected\n");
+                break;
+            }
+        }
+        if (!pending_text.empty()) {
+            xtest_type(pending_text);
+            pending_text.clear();
+        }
+    }
 
     while (running) {
         int ret = poll(&pfd, 1, 200);
@@ -315,7 +342,9 @@ int main(int argc, char **argv) {
             }
 
             fprintf(stderr, "dictate: \"%s\" [%.0f ms]\n", text.c_str(), ms);
+            pending_text = text;
             xtest_type(text);
+            pending_text.clear();
         }
     }
 
