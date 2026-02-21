@@ -132,6 +132,11 @@ Modifier is `0` (no modifier required). `spawn()` forks+execs the command array.
 | `single_segment` | `false` | Allow multiple segments for longer recordings. Whisper naturally segments at ~30s boundaries. |
 | `n_threads` | `4` | CPU threads for mel spectrogram computation and other non-GPU steps. |
 | `language` | from config | Hardcoded language skips the 30-token language detection pass. |
+| `initial_prompt` | from config | Biases decoder toward domain-specific words (e.g. "qutebrowser"). Soft bias only — not reliable for words the acoustic model is confident about. |
+
+### Post-processing replacements
+
+After transcription, before injection, the daemon runs case-insensitive find-and-replace using `replace` rules from `dictate.conf`. Each rule is `replace = wrong text -> correct text`. This catches words Whisper consistently misrecognizes regardless of the initial prompt (e.g. "Qt browser" → "qutebrowser"). Replacements are applied in config order.
 
 ### Model details
 
